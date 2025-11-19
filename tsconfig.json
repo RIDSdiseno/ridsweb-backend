@@ -1,0 +1,21 @@
+{
+  "compilerOptions": {
+    /* ▶ Salida y entrada */
+    "rootDir": "src",
+    "outDir": "dist",
+
+    /* ▶ Target / módulo para backend Node */
+    "target": "ES2020",
+    "module": "commonjs",
+    "moduleResolution": "node",
+
+    /* ▶ Calidad de tipos */
+    "strict": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+
+    /* ▶ Para poder usar import default de libs CommonJS (express, cors, etc.) */
+    "esModuleInterop": true
+  },
+  "include": ["src"]
+}
