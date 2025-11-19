@@ -191,11 +191,11 @@ export const iaChat = async (req: Request, res: Response) => {
     // 👇 Detectar posible redirección marcada por la IA
     let redirectTo: string | null = null;
 
-    // Busca marcas como [[REDIRECT:PLANES]], [[REDIRECT:SERVICIOS]], etc.
-    const redirectMatch = reply.match(/^\s*\[\[REDIRECT:([A-Z_]+)\]\]/);
+    // Busca marcas como [[REDIRECT:PLANES]], [[REDIRECT:SERVICIOS]], etc. en cualquier parte (case-insensitive)
+    const redirectMatch = reply.match(/\[\[REDIRECT:([A-Z_]+)\]\]/i);
 
     if (redirectMatch) {
-      const code = redirectMatch[1]; // PLANES, SERVICIOS, SOBRE_NOSOTROS, FOOTER...
+      const code = redirectMatch[1].toUpperCase(); // PLANES, SERVICIOS, SOBRE_NOSOTROS, FOOTER...
 
       // Mapeo a claves más amigables para el front
       switch (code) {
@@ -216,8 +216,8 @@ export const iaChat = async (req: Request, res: Response) => {
           redirectTo = null;
       }
 
-      // Quitar la marca del texto que verá el usuario
-      reply = reply.replace(/^\s*\[\[REDIRECT:[A-Z_]+\]\]\s*/i, "").trim();
+      // Quitar TODAS las marcas [[REDIRECT:...]] del texto que verá el usuario
+      reply = reply.replace(/\s*\[\[REDIRECT:[A-Z_]+\]\]\s*/gi, "").trim();
 
       if (!reply) {
         reply =

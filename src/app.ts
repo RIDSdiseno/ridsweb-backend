@@ -24,11 +24,16 @@ console.log(
 );
 console.log("=== END ENV CHECK ===");
 
-// Orígenes por defecto (local)
-const defaultOrigins = ["http://localhost:5173", "http://localhost:3000"];
+// Orígenes por defecto (local + producción)
+const defaultOrigins = [
+  "http://localhost:5173",
+  "http://localhost:3000",
+  "https://rids.cl",
+  "https://www.rids.cl",
+];
 
-// Origen extra (por ejemplo: https://rids.cl)
-const extraOrigin = process.env.FRONTEND_ORIGIN; // ej: https://rids.cl
+// Origen extra opcional por env (por ejemplo: otro dominio)
+const extraOrigin = process.env.FRONTEND_ORIGIN; // ej: https://otro-dominio.cl
 const allowedOrigins = extraOrigin
   ? [...defaultOrigins, extraOrigin]
   : defaultOrigins;
