@@ -55,6 +55,40 @@ const OPENAI_API_KEY = process.env.OPENAI_API_KEY || "";
 const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-4.1-mini";
 const AI_TEMPERATURE = Number(process.env.AI_TEMPERATURE ?? 0.2);
 
+// ===============================
+// Cola simple para limitar concurrencia global
+// ===============================
+const MAX_PARALLEL_CALLS = Number(process.env.AI_MAX_PARALLEL_CALLS || 2);
+let activeCalls = 0;
+const queue: Array<() => void> = [];
+
+function enqueue<T>(fn: () => Promise<T>): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const run = async () => {
+      activeCalls++;
+      try {
+        const result = await fn();
+        resolve(result);
+      } catch (err) {
+        reject(err);
+      } finally {
+        activeCalls--;
+        const next = queue.shift();
+        if (next) {
+          // Pequeño delay opcional para suavizar RPM
+          setTimeout(next, 100);
+        }
+      }
+    };
+
+    if (activeCalls < MAX_PARALLEL_CALLS) {
+      run();
+    } else {
+      queue.push(run);
+    }
+  });
+}
+
 // -----------------------------------------------------------------------------
 // PROMPT DE CONTROL (SOLO CHAT, SIN TICKETS)
 // -----------------------------------------------------------------------------
@@ -106,11 +140,13 @@ Reglas de uso:
 ...
 `;
 
-
 // -----------------------------------------------------------------------------
-// Llamado a OpenAI
+// Llamado a OpenAI con backoff para 429
 // -----------------------------------------------------------------------------
-async function callOpenAI(messages: ChatMessage[]) {
+async function callOpenAIWithRetry(
+  messages: ChatMessage[],
+  maxRetries = 3
+): Promise<{ text: string | null }> {
   if (!OPENAI_API_KEY) {
     return {
       text:
@@ -118,33 +154,60 @@ async function callOpenAI(messages: ChatMessage[]) {
     };
   }
 
-  const resp = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${OPENAI_API_KEY}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: OPENAI_MODEL,
-      temperature: AI_TEMPERATURE,
-      max_tokens: 320,
-      frequency_penalty: 0.2,
-      presence_penalty: 0.0,
-      messages,
-      // 👇 Importante: sin tools, solo conversación
-    }),
-  });
+  let attempt = 0;
 
-  if (!resp.ok) {
-    const t = await resp.text().catch(() => "");
-    console.error("OpenAI error:", resp.status, t);
-    return { text: null as string | null };
+  while (true) {
+    const resp = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${OPENAI_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: OPENAI_MODEL,
+        temperature: AI_TEMPERATURE,
+        max_tokens: 280, // un poco más bajo para cuidar TPM
+        frequency_penalty: 0.2,
+        presence_penalty: 0.0,
+        messages,
+      }),
+    });
+
+    if (resp.ok) {
+      const data = (await resp.json()) as OpenAIChatResponse;
+
+      if (data.usage) {
+        console.log(
+          `[AI USAGE] prompt=${data.usage.prompt_tokens} completion=${data.usage.completion_tokens} total=${data.usage.total_tokens}`
+        );
+      }
+
+      const first = data?.choices?.[0];
+      const content = (first?.message?.content ?? "") || null;
+      return { text: content?.trim() || null };
+    }
+
+    // Manejo de errores
+    const bodyText = await resp.text().catch(() => "");
+
+    // Si es 429, aplicamos backoff exponencial sencillo
+    if (resp.status === 429 && attempt < maxRetries) {
+      attempt++;
+      const delayMs = 1000 * Math.pow(2, attempt); // 1s, 2s, 4s...
+      console.warn(
+        `[OpenAI 429] intento=${attempt} - esperando ${delayMs}ms. Detalle: ${bodyText.slice(
+          0,
+          200
+        )}`
+      );
+      await new Promise((res) => setTimeout(res, delayMs));
+      continue;
+    }
+
+    // Otros errores o ya sin reintentos
+    console.error("OpenAI error:", resp.status, bodyText);
+    return { text: null };
   }
-
-  const data = (await resp.json()) as OpenAIChatResponse;
-  const first = data?.choices?.[0];
-  const content = (first?.message?.content ?? "") || null;
-  return { text: content?.trim() || null };
 }
 
 // -----------------------------------------------------------------------------
@@ -186,13 +249,34 @@ ${escalateLine}
 ${sessionFacts}
 `;
 
+  // Usar transcript recortado para no explotar tokens
+  const transcript = input.context?.transcript || [];
+  const transcriptLines = transcript
+    .map((t) => `${t.from === "client" ? "Usuario" : "RIDSI"}: ${t.text}`)
+    .join("\n");
+
+  const trimmedTranscript =
+    transcriptLines.length > 2000
+      ? transcriptLines.slice(transcriptLines.length - 2000)
+      : transcriptLines;
+
+  const historyBlock = trimmedTranscript
+    ? `Historial reciente de la conversación (puede estar truncado):\n${trimmedTranscript}\n\n`
+    : "";
+
+  const userContent = `
+${historyBlock}Mensaje actual del usuario:
+${user}${prev}${prevBot}
+`.trim();
+
   const messages: ChatMessage[] = [
     { role: "system", content: SYSTEM_PROMPT },
-    { role: "user", content: `${user}${prev}${prevBot}` },
+    { role: "user", content: userContent },
   ];
 
   try {
-    const { text } = await callOpenAI(messages);
+    // Pasamos por la cola para limitar concurrencia
+    const { text } = await enqueue(() => callOpenAIWithRetry(messages));
 
     if (text && text.length > 0) {
       return text;
