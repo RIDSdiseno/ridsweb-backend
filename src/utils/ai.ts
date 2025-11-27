@@ -1,10 +1,6 @@
 // utils/ai.ts
 import "dotenv/config";
 
-// Si usas Node < 18, descomenta estas 2 líneas:
-// import fetch from "node-fetch";
-// (globalThis as any).fetch = fetch;
-
 export type RunAIInput = {
   userText: string;
   context?: {
@@ -58,7 +54,8 @@ const AI_TEMPERATURE = Number(process.env.AI_TEMPERATURE ?? 0.2);
 // ===============================
 // Cola simple para limitar concurrencia global
 // ===============================
-const MAX_PARALLEL_CALLS = Number(process.env.AI_MAX_PARALLEL_CALLS || 2);
+// ⚠️ Por defecto 1 llamada en paralelo, para cuidar el RPM=3
+const MAX_PARALLEL_CALLS = Number(process.env.AI_MAX_PARALLEL_CALLS || 1);
 let activeCalls = 0;
 const queue: Array<() => void> = [];
 
@@ -75,8 +72,8 @@ function enqueue<T>(fn: () => Promise<T>): Promise<T> {
         activeCalls--;
         const next = queue.shift();
         if (next) {
-          // Pequeño delay opcional para suavizar RPM
-          setTimeout(next, 100);
+          // pequeño delay para no reventar el RPM
+          setTimeout(next, 150);
         }
       }
     };
@@ -107,32 +104,6 @@ Códigos de redirección disponibles:
 — [[REDIRECT:SOBRE_NOSOTROS]] → Sección / componente de sobre nosotros (SobreNosotros.jsx).
 — [[REDIRECT:FOOTER]]       → Pie de página / contacto (Footer.jsx).
 
-Reglas de uso:
-1) Si el usuario pregunta o dice algo como "quiero ver los planes", "muéstrame los planes":
-   — Explícale brevemente los planes.
-   — Pregúntale: "¿Quieres que te lleve a la sección de planes en la página para ver más detalle?"
-   — SOLO si responde que sí, en tu siguiente mensaje agrega al inicio:
-        [[REDIRECT:PLANES]]
-      y luego un mensaje normal, por ejemplo:
-        "Perfecto, te llevo a la sección de planes para que revises el detalle."
-
-2) Si el usuario pide ver "servicios", "qué hacemos", etc.:
-   — Explica brevemente los servicios.
-   — Pregunta si quiere ir a la sección de servicios.
-   — Si acepta, usa:
-        [[REDIRECT:SERVICIOS]]
-
-3) Si el usuario quiere "sobre nosotros", "quiénes son", "quiénes somos":
-   — Explica brevemente quiénes son.
-   — Pregunta si quiere ir a la sección Sobre Nosotros.
-   — Si acepta, usa:
-        [[REDIRECT:SOBRE_NOSOTROS]]
-
-4) Si el usuario quiere "contacto", "correo", "formulario", "datos de contacto":
-   — Dale la info básica si la conoces y ofrece llevarlo al footer.
-   — Si acepta, usa:
-        [[REDIRECT:FOOTER]]
-
 — IMPORTANTE:
    • Solo usa UNA marca [[REDIRECT:...]] por mensaje.
    • La marca debe ir SIEMPRE al inicio de tu respuesta, sin texto antes.
@@ -145,7 +116,7 @@ Reglas de uso:
 // -----------------------------------------------------------------------------
 async function callOpenAIWithRetry(
   messages: ChatMessage[],
-  maxRetries = 3
+  maxRetries = 1 // 👈 como hay esperas largas (20s+), solo 1 reintento corto
 ): Promise<{ text: string | null }> {
   if (!OPENAI_API_KEY) {
     return {
@@ -166,15 +137,18 @@ async function callOpenAIWithRetry(
       body: JSON.stringify({
         model: OPENAI_MODEL,
         temperature: AI_TEMPERATURE,
-        max_tokens: 280, // un poco más bajo para cuidar TPM
+        // 🔻 Bajar salida para reducir "Requested X tokens"
+        max_tokens: 200,
         frequency_penalty: 0.2,
         presence_penalty: 0.0,
         messages,
       }),
     });
 
+    const bodyText = await resp.text().catch(() => "");
+
     if (resp.ok) {
-      const data = (await resp.json()) as OpenAIChatResponse;
+      const data = JSON.parse(bodyText) as OpenAIChatResponse;
 
       if (data.usage) {
         console.log(
@@ -188,12 +162,28 @@ async function callOpenAIWithRetry(
     }
 
     // Manejo de errores
-    const bodyText = await resp.text().catch(() => "");
-
-    // Si es 429, aplicamos backoff exponencial sencillo
     if (resp.status === 429 && attempt < maxRetries) {
       attempt++;
-      const delayMs = 1000 * Math.pow(2, attempt); // 1s, 2s, 4s...
+
+      // Intentamos leer "Please try again in XXs"
+      let suggestedDelayMs: number | null = null;
+      const match = bodyText.match(/try again in (\d+)s/i);
+      if (match) {
+        const sec = parseInt(match[1], 10);
+        if (!Number.isNaN(sec)) suggestedDelayMs = sec * 1000;
+      }
+
+      // Si nos sugieren esperar MUCHO (>= 10s), no vale la pena reintentar
+      if (suggestedDelayMs && suggestedDelayMs >= 10000) {
+        console.warn(
+          `[OpenAI 429] sugerido esperar ${suggestedDelayMs}ms, no reintento para no bloquear al usuario`
+        );
+        break;
+      }
+
+      const delayMs =
+        suggestedDelayMs && suggestedDelayMs > 0 ? suggestedDelayMs : 2000;
+
       console.warn(
         `[OpenAI 429] intento=${attempt} - esperando ${delayMs}ms. Detalle: ${bodyText.slice(
           0,
@@ -255,9 +245,11 @@ ${sessionFacts}
     .map((t) => `${t.from === "client" ? "Usuario" : "RIDSI"}: ${t.text}`)
     .join("\n");
 
+  // 🔻 Reducimos bastante el historial, antes tenías prompts de ~740 tokens
+  const transcriptMaxChars = 1000;
   const trimmedTranscript =
-    transcriptLines.length > 2000
-      ? transcriptLines.slice(transcriptLines.length - 2000)
+    transcriptLines.length > transcriptMaxChars
+      ? transcriptLines.slice(transcriptLines.length - transcriptMaxChars)
       : transcriptLines;
 
   const historyBlock = trimmedTranscript
@@ -282,7 +274,8 @@ ${user}${prev}${prevBot}
       return text;
     }
 
-    return "Tuve un problema procesando tu mensaje 😓. ¿Lo intentamos de nuevo? (puedes contarme si es soporte, ventas o una duda técnica)";
+    // Aquí llegas cuando: 429 con espera larga, o error raro
+    return "En este momento estamos usando mucha capacidad de la IA y no puedo responderte bien 😓. Intenta nuevamente en unos minutos o escríbenos a soporte@rids.cl.";
   } catch (err) {
     console.error("[runAI ERROR]", err);
     return "Tuve un problema procesando tu mensaje 😓. ¿Lo intentamos de nuevo en unos instantes?";
