@@ -122,7 +122,7 @@ Códigos de redirección disponibles:
 async function callOpenAIWithRetry(
   messages: ChatMessage[],
   maxRetries = 1 // 👈 como hay esperas largas (20s+), solo 1 reintento corto
-): Promise<{ text: string | null }> {
+) {
   if (!OPENAI_API_KEY) {
     return {
       text:
