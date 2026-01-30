@@ -7,6 +7,14 @@ import { AIMessage } from "../utils/ai.types";
 // Tipos de sesión
 // =====================
 
+//Arreglamos que la IA reciba los valores como string no AIMessage
+function aiMessageToText(msg: AIMessage): string {
+  return msg.parts
+    .filter((p) => p.type === "text")
+    .map((p) => p.text)
+    .join("");
+}
+
 type TranscriptItem = { from: "client" | "bot"; text: string };
 
 type SessionMem = {
@@ -168,13 +176,15 @@ try {
     context,
   });
 
-  reply = typeof aiResult === "string" ? aiResult : aiResult.content;
+  reply =
+    typeof aiResult === "string"
+      ? aiResult
+      : aiMessageToText(aiResult);
 } catch (err) {
   console.error("[IA ERROR]", err);
   reply =
     "Tuve un problema procesando tu mensaje 😓. ¿Podemos intentarlo de nuevo en unos instantes?";
 }
-
 
     if (!reply.trim()) {
       reply =
