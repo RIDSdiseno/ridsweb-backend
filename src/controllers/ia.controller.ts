@@ -159,14 +159,22 @@ export const iaChat = async (req: Request, res: Response) => {
       channel: channel || "web",
     };
 
-    let reply: string;
-    try {
-      reply = (await runAI({ userText: text, context })) || "";
-    } catch (err) {
-      console.error("[IA ERROR]", err);
-      reply =
-        "Tuve un problema procesando tu mensaje 😓. ¿Podemos intentarlo de nuevo en unos instantes?";
-    }
+ let reply: string;
+try {
+  const aiResult = await runAI({ userText: text, context });
+
+  if (typeof aiResult === "string") {
+    reply = aiResult;
+  } else if (aiResult && typeof aiResult === "object" && "content" in aiResult) {
+    reply = aiResult.content;
+  } else {
+    reply = "";
+  }
+} catch (err) {
+  console.error("[IA ERROR]", err);
+  reply =
+    "Tuve un problema procesando tu mensaje 😓. ¿Podemos intentarlo de nuevo en unos instantes?";
+}
 
     if (!reply.trim()) {
       reply =
