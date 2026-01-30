@@ -1,5 +1,6 @@
 import "dotenv/config";
 import { AIMessage, AIPart } from "./ai.types";
+
 import { ANALYSIS_PROMPT } from "./ai.prompts";
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || "";
@@ -46,7 +47,7 @@ export async function runAI(input: {
     email?: string;
     company?: string;
   };
-}): Promise<AIMessage> {
+}): Promise<string | AIMessage> {
   const userText = input.userText?.trim();
 
   if (!userText) {
