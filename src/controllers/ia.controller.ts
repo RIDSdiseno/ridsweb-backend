@@ -1,6 +1,7 @@
 // src/controllers/ia.controller.ts
 import type { Request, Response } from "express";
 import { runAI } from "../utils/ai";
+import { AIMessage } from "../utils/ai.types";
 
 // =====================
 // Tipos de sesión
@@ -159,22 +160,21 @@ export const iaChat = async (req: Request, res: Response) => {
       channel: channel || "web",
     };
 
- let reply: string;
-try {
-  const aiResult = await runAI({ userText: text, context });
+let reply: string;
 
-  if (typeof aiResult === "string") {
-    reply = aiResult;
-  } else if (aiResult && typeof aiResult === "object" && "content" in aiResult) {
-    reply = aiResult.content;
-  } else {
-    reply = "";
-  }
+try {
+  const aiResult: string | AIMessage = await runAI({
+    userText: text,
+    context,
+  });
+
+  reply = typeof aiResult === "string" ? aiResult : aiResult.content;
 } catch (err) {
   console.error("[IA ERROR]", err);
   reply =
     "Tuve un problema procesando tu mensaje 😓. ¿Podemos intentarlo de nuevo en unos instantes?";
 }
+
 
     if (!reply.trim()) {
       reply =
