@@ -168,7 +168,7 @@ export const iaChat = async (req: Request, res: Response) => {
       channel: channel || "web",
     };
 
-let reply: string;
+let redirectTo: string | null = null;
 
 try {
   const aiResult: string | AIMessage = await runAI({
@@ -176,15 +176,42 @@ try {
     context,
   });
 
-  reply =
-    typeof aiResult === "string"
-      ? aiResult
-      : aiMessageToText(aiResult);
+  if (typeof aiResult === "string") {
+    reply = aiResult;
+  } else {
+    // 1️⃣ Texto visible
+    reply = aiMessageToText(aiResult);
+
+    // 2️⃣ Acciones (tool-calls)
+    for (const part of aiResult.parts) {
+      if (part.type === "tool-call") {
+        if (part.toolName.startsWith("REDIRECT:")) {
+          const target = part.toolName.replace("REDIRECT:", "");
+
+          switch (target) {
+            case "PLANES":
+              redirectTo = "planes";
+              break;
+            case "SERVICIOS":
+              redirectTo = "servicios";
+              break;
+            case "SOBRE_NOSOTROS":
+              redirectTo = "sobreNosotros";
+              break;
+            case "FOOTER":
+              redirectTo = "footer";
+              break;
+          }
+        }
+      }
+    }
+  }
 } catch (err) {
   console.error("[IA ERROR]", err);
   reply =
     "Tuve un problema procesando tu mensaje 😓. ¿Podemos intentarlo de nuevo en unos instantes?";
 }
+
 
     if (!reply.trim()) {
       reply =
@@ -208,9 +235,6 @@ try {
 
     // 👇 Detectar posible redirección marcada por la IA
     let redirectTo: string | null = null;
-
-    // Busca marcas como [[REDIRECT:PLANES]], [[REDIRECT:SERVICIOS]], etc. en cualquier parte (case-insensitive)
-    const redirectMatch = reply.match(/\[\[REDIRECT:([A-Z_]+)\]\]/i);
 
     if (redirectMatch) {
       const code = redirectMatch[1].toUpperCase(); // PLANES, SERVICIOS, SOBRE_NOSOTROS, FOOTER...
