@@ -168,6 +168,7 @@ export const iaChat = async (req: Request, res: Response) => {
       channel: channel || "web",
     };
 
+let reply: string = "";
 let redirectTo: string | null = null;
 
 try {
@@ -233,39 +234,6 @@ try {
       }
     }
 
-    // 👇 Detectar posible redirección marcada por la IA
-    let redirectTo: string | null = null;
-
-    if (redirectMatch) {
-      const code = redirectMatch[1].toUpperCase(); // PLANES, SERVICIOS, SOBRE_NOSOTROS, FOOTER...
-
-      // Mapeo a claves más amigables para el front
-      switch (code) {
-        case "PLANES":
-          redirectTo = "planes";
-          break;
-        case "SERVICIOS":
-        case "SERVICES":
-          redirectTo = "servicios";
-          break;
-        case "SOBRE_NOSOTROS":
-          redirectTo = "sobreNosotros";
-          break;
-        case "FOOTER":
-          redirectTo = "footer";
-          break;
-        default:
-          redirectTo = null;
-      }
-
-      // Quitar TODAS las marcas [[REDIRECT:...]] del texto que verá el usuario
-      reply = reply.replace(/\s*\[\[REDIRECT:[A-Z_]+\]\]\s*/gi, "").trim();
-
-      if (!reply) {
-        reply =
-          "Perfecto, te llevo a esa sección para que veas más detalle.";
-      }
-    }
 
     // Actualizar memoria
     const newTranscript: TranscriptItem[] = [
