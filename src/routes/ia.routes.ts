@@ -1,10 +1,9 @@
 import { Router } from "express";
-import { chat } from "../controllers/ia.controller";
+import { chatWithIA } from "../controllers/ia.controller"; // <-- Verifica que este nombre coincida
 
 const router = Router();
 
-// Definimos el endpoint de chat
-// POST /api/ia/chat
-router.post("/chat", chat);
+// La ruta POST que llama a tu función
+router.post("/chat", chatWithIA);
 
 export default router;
