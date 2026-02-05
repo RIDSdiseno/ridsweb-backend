@@ -9,6 +9,7 @@
     "start": "node dist/app.js"
   },
   "dependencies": {
+    "ai": "^6.0.69",
     "cors": "^2.8.5",
     "dotenv": "^16.0.0",
     "express": "^4.19.0",

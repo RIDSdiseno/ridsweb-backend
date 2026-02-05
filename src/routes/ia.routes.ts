@@ -1,11 +1,10 @@
-// src/routes/ia.routes.ts
 import { Router } from "express";
-import { iaChat, iaHealth } from "../controllers/ia.controller";
+import { chat } from "../controllers/ia.controller";
 
 const router = Router();
 
-// para la página (chat web)
-router.post("/chat", iaChat);
-router.get("/health", iaHealth);
+// Definimos el endpoint de chat
+// POST /api/ia/chat
+router.post("/chat", chat);
 
 export default router;

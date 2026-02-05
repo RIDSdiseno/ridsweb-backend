@@ -4,6 +4,7 @@ import "dotenv/config"; // Carga las variables de entorno desde .env
 import express, { Application } from "express";
 import cors from "cors";
 import apiRouter from "./api.routes";
+import iaRoutes from "./routes/ia.routes";
 
 const app: Application = express();
 
@@ -65,3 +66,6 @@ app.listen(PORT, () => {
   console.log(`RIDS backend (TS) escuchando en http://localhost:${PORT}`);
   console.log("CORS allowed origins:", allowedOrigins);
 });
+
+// ... otros middlewares
+app.use("/api/ia", iaRoutes);
