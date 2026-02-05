@@ -1,27 +1,22 @@
 import { openai } from "./ai.client";
 import { getHistory, saveMessage } from "./memory";
-
+// 1. IMPORTACIÓN: Traemos el manual de 8 reglas
+import { ANALYSIS_PROMPT } from "../utils/ai.prompts"; 
 
 export async function runAI(userText: string, sessionId: string = "default") {
   
   console.log("🔍 RECIBIDO EN BACKEND -> sessionId:", sessionId, "| texto:", userText);
   
-  // 1. Recuperamos el pasado (lo que estaba en memory.ts)
   const history = getHistory(sessionId);
 
   try {
     const response = await openai.chat.completions.create({
-      model: "gpt-4o", // O "gpt-4o-mini" para que sea más barato y rápido
+      model: "gpt-4o", 
       messages: [
         {
           role: "system",
-          content: `Eres un asesor técnico de alto nivel. 
-          Debes analizar el historial para dar respuestas coherentes.
-          Responde SIEMPRE en formato JSON:
-          {
-            "thought": "Análisis interno de lo que el usuario quiere",
-            "reply": "Tu respuesta directa"
-          }`
+          // 2. INYECCIÓN: Reemplazamos el texto genérico por tu manual proactivo
+          content: ANALYSIS_PROMPT 
         },
         ...history,
         { role: "user", content: userText }
@@ -29,23 +24,22 @@ export async function runAI(userText: string, sessionId: string = "default") {
       response_format: { type: "json_object" }
     });
 
-const result = JSON.parse(response.choices[0].message.content || "{}");
+    const result = JSON.parse(response.choices[0].message.content || "{}");
 
-    // 1. Guardamos el mensaje del usuario (Normal)
     saveMessage(sessionId, "user", userText);
-
-    // 2. VITAL: Guardamos la respuesta tal cual la generó la IA (en JSON)
-    // para que en la próxima vuelta vea que ha sido coherente con el formato.
     saveMessage(sessionId, "assistant", response.choices[0].message.content || "");
 
+    // 3. RETORNO: Agregamos intent y action para que el front reciba la orden
     return {
       success: true,
-      thought: result.thought,
-      reply: result.reply
+      thought: result.reasoning || result.thought, 
+      reply: result.reply,
+      intent: result.intent, // Necesario para lógica de ventas
+      action: result.action  // Contiene el 'target': 'PLANES' o 'SERVICIOS'
     };
 
   } catch (error) {
     console.error("Fallo en el cerebro:", error);
-    return { success: false, reply: "Hubo un cortocircuito en mi lógica. Me estoy recargando..." };
+    return { success: false, reply: "Hubo un cortocircuito en mi lógica... Necesito recargarme 😛" };
   }
 }
