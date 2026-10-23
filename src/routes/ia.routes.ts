@@ -1,9 +1,28 @@
+// src/routes/ia.routes.ts
+
 import { Router } from "express";
-import { chatWithIA } from "../controllers/ia.controller"; // <-- Verifica que este nombre coincida
+
+import {
+    chatWithIA,
+    clearIASession,
+} from "../controllers/ia.controller";
+
+import {
+    aiLimiter,
+} from "../ai/aiLimiter";
 
 const router = Router();
 
-// La ruta POST que llama a tu función
-router.post("/chat", chatWithIA);
+router.post(
+    "/chat",
+    aiLimiter,
+    chatWithIA
+);
+
+router.post(
+    "/clear",
+    aiLimiter,
+    clearIASession
+);
 
 export default router;
