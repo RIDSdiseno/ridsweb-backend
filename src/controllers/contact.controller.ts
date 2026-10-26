@@ -1,5 +1,10 @@
 // src/controllers/contact.controller.ts
-import type { Request, Response } from "express";
+
+import type {
+  Request,
+  Response,
+} from "express";
+
 import nodemailer from "nodemailer";
 
 const CATEGORIAS_PERMITIDAS = [
@@ -17,13 +22,17 @@ const CATEGORIAS_PERMITIDAS = [
   "Migración de correos",
 ];
 
-function normalizeString(value: unknown): string {
+function normalizeString(
+  value: unknown
+): string {
   return typeof value === "string"
     ? value.trim()
     : "";
 }
 
-function escapeHtml(value: string): string {
+function escapeHtml(
+  value: string
+): string {
   return value
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
@@ -32,8 +41,33 @@ function escapeHtml(value: string): string {
     .replace(/'/g, "&#039;");
 }
 
-function isValidEmail(email: string): boolean {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+function isValidEmail(
+  email: string
+): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(
+    email
+  );
+}
+
+function formatChileDate(
+  date: Date
+): string {
+  return new Intl.DateTimeFormat(
+    "es-CL",
+    {
+      timeZone: "America/Santiago",
+
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+
+      hour12: false,
+    }
+  ).format(date);
 }
 
 export async function handleContactForm(
@@ -41,56 +75,148 @@ export async function handleContactForm(
   res: Response
 ) {
   try {
-    const nombre = normalizeString(req.body?.nombre);
-    const email = normalizeString(req.body?.email);
-    const categoria = normalizeString(req.body?.categoria);
-    const mensaje = normalizeString(req.body?.mensaje);
+    // ========================================
+    // DATOS RECIBIDOS
+    // ========================================
 
-    // =========================
-    // VALIDACIÓN
-    // =========================
+    const nombre =
+      normalizeString(
+        req.body?.nombre
+      );
 
-    if (!nombre || !email || !categoria || !mensaje) {
+    const email =
+      normalizeString(
+        req.body?.email
+      );
+
+    const categoria =
+      normalizeString(
+        req.body?.categoria
+      );
+
+    const mensaje =
+      normalizeString(
+        req.body?.mensaje
+      );
+
+    const privacyRead =
+      req.body?.privacyRead === true;
+
+    // ========================================
+    // VALIDACIÓN CAMPOS
+    // ========================================
+
+    if (
+      !nombre ||
+      !email ||
+      !categoria ||
+      !mensaje
+    ) {
       return res.status(400).json({
         ok: false,
-        error: "Todos los campos son obligatorios.",
+
+        error:
+          "Todos los campos son obligatorios.",
       });
     }
 
-    if (nombre.length < 2 || nombre.length > 120) {
+    if (
+      nombre.length < 2 ||
+      nombre.length > 120
+    ) {
       return res.status(400).json({
         ok: false,
-        error: "El nombre ingresado no es válido.",
+
+        error:
+          "El nombre ingresado no es válido.",
       });
     }
 
-    if (email.length > 254 || !isValidEmail(email)) {
+    if (
+      email.length > 254 ||
+      !isValidEmail(email)
+    ) {
       return res.status(400).json({
         ok: false,
-        error: "El correo electrónico ingresado no es válido.",
+
+        error:
+          "El correo electrónico ingresado no es válido.",
       });
     }
 
-    if (!CATEGORIAS_PERMITIDAS.includes(categoria)) {
+    if (
+      !CATEGORIAS_PERMITIDAS.includes(
+        categoria
+      )
+    ) {
       return res.status(400).json({
         ok: false,
-        error: "La categoría seleccionada no es válida.",
+
+        error:
+          "La categoría seleccionada no es válida.",
       });
     }
 
-    if (mensaje.length < 5 || mensaje.length > 5000) {
+    if (
+      mensaje.length < 5 ||
+      mensaje.length > 5000
+    ) {
       return res.status(400).json({
         ok: false,
+
         error:
           "El mensaje debe contener entre 5 y 5000 caracteres.",
       });
     }
 
-    // No guardar nombre/email/mensaje en logs.
-    console.log("[CONTACT] Formulario recibido", {
-      categoria,
-      timestamp: new Date().toISOString(),
-    });
+    // ========================================
+    // VALIDACIÓN POLÍTICA DE PRIVACIDAD
+    // ========================================
+
+    if (!privacyRead) {
+      return res.status(400).json({
+        ok: false,
+
+        error:
+          "Debes confirmar que has leído la Política de Privacidad.",
+      });
+    }
+
+    // ========================================
+    // FECHA / HORA DEL ENVÍO
+    // ========================================
+
+    const submittedAt =
+      new Date();
+
+    const submittedAtISO =
+      submittedAt.toISOString();
+
+    const submittedAtChile =
+      formatChileDate(
+        submittedAt
+      );
+
+    // ========================================
+    // LOG SEGURO
+    // ========================================
+
+    // No guardar nombre, email ni mensaje
+    // en logs.
+
+    console.log(
+      "[CONTACT] Formulario recibido",
+      {
+        categoria,
+        privacyRead,
+        timestamp:
+          submittedAtISO,
+      }
+    );
+
+    // ========================================
+    // SMTP
+    // ========================================
 
     if (
       !process.env.SMTP_HOST ||
@@ -103,39 +229,77 @@ export async function handleContactForm(
 
       return res.status(500).json({
         ok: false,
+
         error:
           "El servicio de contacto no está disponible temporalmente.",
       });
     }
 
     const smtpPort =
-      Number(process.env.SMTP_PORT) || 587;
+      Number(
+        process.env.SMTP_PORT
+      ) || 587;
 
-    const transporter = nodemailer.createTransport({
-      host: process.env.SMTP_HOST,
-      port: smtpPort,
-      secure: smtpPort === 465,
+    const transporter =
+      nodemailer.createTransport({
+        host:
+          process.env.SMTP_HOST,
 
-      auth: {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASS,
-      },
-    });
+        port:
+          smtpPort,
+
+        secure:
+          smtpPort === 465,
+
+        auth: {
+          user:
+            process.env.SMTP_USER,
+
+          pass:
+            process.env.SMTP_PASS,
+        },
+      });
+
+    // ========================================
+    // ESCAPADO HTML
+    // ========================================
 
     const nombreSeguro =
-      escapeHtml(nombre);
+      escapeHtml(
+        nombre
+      );
 
     const emailSeguro =
-      escapeHtml(email);
+      escapeHtml(
+        email
+      );
 
     const categoriaSegura =
-      escapeHtml(categoria);
+      escapeHtml(
+        categoria
+      );
 
     const mensajeSeguro =
-      escapeHtml(mensaje).replace(
+      escapeHtml(
+        mensaje
+      ).replace(
         /\n/g,
         "<br/>"
       );
+
+    const fechaChileSegura =
+      escapeHtml(
+        submittedAtChile
+      );
+
+    const fechaISOSegura =
+      escapeHtml(
+        submittedAtISO
+      );
+
+    // ========================================
+    // CORREO
+    // ========================================
 
     await transporter.sendMail({
       from:
@@ -145,10 +309,15 @@ export async function handleContactForm(
         process.env.CONTACT_EMAIL ||
         "soporte@rids.cl",
 
-      replyTo: email,
+      replyTo:
+        email,
 
       subject:
         `[${categoria}] Nuevo mensaje desde rids.cl`,
+
+      // ======================================
+      // VERSIÓN TEXTO
+      // ======================================
 
       text: `
 Nuevo mensaje desde el formulario web de RIDS.
@@ -159,7 +328,19 @@ Email: ${email}
 
 Mensaje:
 ${mensaje}
+
+----------------------------------------
+PRIVACIDAD Y REGISTRO DEL ENVÍO
+----------------------------------------
+
+Política de Privacidad leída: Sí
+Fecha y hora del envío (Chile): ${submittedAtChile}
+Referencia UTC: ${submittedAtISO}
       `.trim(),
+
+      // ======================================
+      // VERSIÓN HTML
+      // ======================================
 
       html: `
         <div
@@ -169,25 +350,35 @@ ${mensaje}
             line-height: 1.6;
           "
         >
-          <h2>Nuevo mensaje desde rids.cl</h2>
+          <h2>
+            Nuevo mensaje desde rids.cl
+          </h2>
 
           <p>
-            <strong>Categoría:</strong>
+            <strong>
+              Categoría:
+            </strong>
             ${categoriaSegura}
           </p>
 
           <p>
-            <strong>Nombre:</strong>
+            <strong>
+              Nombre:
+            </strong>
             ${nombreSeguro}
           </p>
 
           <p>
-            <strong>Correo:</strong>
+            <strong>
+              Correo:
+            </strong>
             ${emailSeguro}
           </p>
 
           <p>
-            <strong>Mensaje:</strong>
+            <strong>
+              Mensaje:
+            </strong>
           </p>
 
           <div
@@ -199,12 +390,58 @@ ${mensaje}
           >
             ${mensajeSeguro}
           </div>
+
+          <div
+            style="
+              margin-top: 24px;
+              padding: 14px 16px;
+              background: #f8fafc;
+              border: 1px solid #e2e8f0;
+              border-radius: 8px;
+            "
+          >
+            <p
+              style="
+                margin-top: 0;
+                font-weight: bold;
+              "
+            >
+              Registro del envío
+            </p>
+
+            <p>
+              <strong>
+                Política de Privacidad leída:
+              </strong>
+              Sí
+            </p>
+
+            <p>
+              <strong>
+                Fecha y hora del envío
+                (America/Santiago):
+              </strong>
+              ${fechaChileSegura}
+            </p>
+
+            <p>
+              <strong>
+                Referencia UTC:
+              </strong>
+              ${fechaISOSegura}
+            </p>
+          </div>
         </div>
       `,
     });
 
+    // ========================================
+    // RESPUESTA
+    // ========================================
+
     return res.status(200).json({
       ok: true,
+
       message:
         "Contacto recibido. Gracias por escribir a RIDS.",
     });
@@ -218,6 +455,7 @@ ${mensaje}
 
     return res.status(500).json({
       ok: false,
+
       error:
         "No fue posible enviar tu mensaje. Intenta nuevamente más tarde.",
     });
