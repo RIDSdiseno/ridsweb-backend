@@ -10,6 +10,7 @@ import cors from "cors";
 import helmet from "helmet";
 
 import apiRouter from "./api.routes";
+import { cerrarNavegador } from "./analizador/navegador";
 
 const app: Application =
   express();
@@ -110,7 +111,7 @@ app.use(
 ===================================================== */
 
 /**
- * Contacto y chatbot sólo utilizan
+ * Contacto, chatbot y analizador sólo utilizan
  * payloads pequeños.
  */
 app.use(
@@ -136,6 +137,10 @@ app.use(
  *
  * POST /api/ia/chat
  * POST /api/ia/clear
+ *
+ * POST /api/analizador/analisis
+ * GET  /api/analizador/analisis/:id
+ * GET  /api/analizador/salud
  */
 app.use(
   "/api",
@@ -150,11 +155,12 @@ const PORT =
   process.env.PORT ||
   4000;
 
-app.listen(
-  PORT,
-  () => {
-    console.log(
-      `RIDS backend escuchando en puerto ${PORT}`
-    );
-  }
-);
+const server =
+  app.listen(
+    PORT,
+    () => {
+      console.log(
+        `RIDS backend escuchando en puerto ${PORT}`
+      );
+    }
+  );

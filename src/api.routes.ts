@@ -8,6 +8,7 @@ import {
 
 import iaRouter from "./routes/ia.routes";
 import contactRouter from "./routes/contact.routes";
+import analizadorRouter from "./analizador/analizador.routes";
 
 const router = Router();
 
@@ -60,6 +61,18 @@ router.use(
 router.use(
   "/contact",
   contactRouter
+);
+
+/**
+ * Analizador Ley 21.719
+ *
+ * POST /api/analizador/analisis
+ * GET  /api/analizador/analisis/:id
+ * GET  /api/analizador/salud
+ */
+router.use(
+  "/analizador",
+  analizadorRouter
 );
 
 export default router;
