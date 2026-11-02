@@ -115,8 +115,9 @@ function guardarSolicitud(registro: object) {
 // ============================================================
 
 const limitePorIp = rateLimit({
-  windowMs: 60 * 60 * 1000,
-  max: () => Number(process.env.ANALIZADOR_LIMITE_HORA) || 6,
+  windowMs: 60 * 60 * 1000,                                    // ventana de 1 hora
+  max: () => Number(process.env.ANALIZADOR_LIMITE_HORA) || 100, // 100 por IP y hora
+  skipFailedRequests: true,                                     // los errores (400, 503…) no cuentan
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: "Alcanzó el máximo de análisis por hora. Intente más tarde." },
