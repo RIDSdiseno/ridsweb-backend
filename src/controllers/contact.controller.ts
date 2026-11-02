@@ -5,7 +5,11 @@ import type {
   Response,
 } from "express";
 
-import nodemailer from "nodemailer";
+import {
+  enviarCorreo,
+  correoConfigurado,
+  correoRids,
+} from "../utils/correo";
 
 const CATEGORIAS_PERMITIDAS = [
   "Atención de Emergencias. SOS Soporte.cl",
@@ -215,16 +219,13 @@ export async function handleContactForm(
     );
 
     // ========================================
-    // SMTP
+    // CONFIGURACIÓN DE CORREO
+    // (Microsoft Graph en producción, SMTP en local)
     // ========================================
 
-    if (
-      !process.env.SMTP_HOST ||
-      !process.env.SMTP_USER ||
-      !process.env.SMTP_PASS
-    ) {
+    if (!correoConfigurado()) {
       console.error(
-        "[CONTACT] Configuración SMTP incompleta"
+        "[CONTACT] Configuración de correo incompleta"
       );
 
       return res.status(500).json({
@@ -234,31 +235,6 @@ export async function handleContactForm(
           "El servicio de contacto no está disponible temporalmente.",
       });
     }
-
-    const smtpPort =
-      Number(
-        process.env.SMTP_PORT
-      ) || 587;
-
-    const transporter =
-      nodemailer.createTransport({
-        host:
-          process.env.SMTP_HOST,
-
-        port:
-          smtpPort,
-
-        secure:
-          smtpPort === 465,
-
-        auth: {
-          user:
-            process.env.SMTP_USER,
-
-          pass:
-            process.env.SMTP_PASS,
-        },
-      });
 
     // ========================================
     // ESCAPADO HTML
@@ -301,25 +277,24 @@ export async function handleContactForm(
     // CORREO
     // ========================================
 
-    await transporter.sendMail({
-      from:
-        `"Formulario Web RIDS" <${process.env.SMTP_USER}>`,
+    await enviarCorreo({
+      nombreRemitente:
+        "Formulario Web RIDS",
 
-      to:
-        process.env.CONTACT_EMAIL ||
-        "soporte@rids.cl",
+      para:
+        correoRids(),
 
-      replyTo:
+      responderA:
         email,
 
-      subject:
+      asunto:
         `[${categoria}] Nuevo mensaje desde rids.cl`,
 
       // ======================================
       // VERSIÓN TEXTO
       // ======================================
 
-      text: `
+      texto: `
 Nuevo mensaje desde el formulario web de RIDS.
 
 Categoría: ${categoria}
