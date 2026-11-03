@@ -70,6 +70,7 @@ interface Servicio {
   nombre: string;
   tipo: string;
   cookies: boolean;
+  soloCodigo?: boolean;
 }
 
 export interface Resultado {
@@ -532,8 +533,12 @@ export async function analizarSitio(
 
   const servicios: Servicio[] = SERVICIOS
     .filter(([, re]) => re.test(html) || (codigoSpa !== "" && re.test(codigoSpa)))
-    .map(([nombre, , tipo, cookies]) => ({ nombre, tipo, cookies }));
+    .map(([nombre, re, tipo, cookies]) => ({ nombre, tipo, cookies, soloCodigo: !re.test(html) }));
   const rastreadores = servicios.filter((s) => s.cookies && !/Seguridad/.test(s.tipo));
+
+  const EMBEBIDOS = /Mapa de terceros|Video de terceros/;
+  const embebidosEnCodigo = rastreadores.filter((s) => s.soloCodigo && EMBEBIDOS.test(s.tipo));
+  const rastreadoresAlEntrar = rastreadores.filter((s) => !embebidosEnCodigo.includes(s));
 
   const textoInicio = texto(html);
   const banner =
@@ -692,12 +697,17 @@ export async function analizarSitio(
       }
       : navegador
         ? { estado: "ok", detalle: "No se instalan cookies de analítica ni publicidad antes de aceptar." }
-        : rastreadores.length
+        : rastreadoresAlEntrar.length
           ? {
             estado: "revisar",
             detalle: "El sitio carga herramientas que suelen instalar cookies; confirme en el navegador que esperan el consentimiento.",
           }
-          : { estado: "ok", detalle: "No detectamos cookies de analítica ni publicidad." }),
+          : {
+            estado: "ok",
+            detalle: embebidosEnCodigo.length
+              ? `No detectamos analítica ni publicidad al entrar. El código incluye ${embebidosEnCodigo.map((x) => x.nombre).join(", ")}: confirme que se active solo a petición del visitante (por ejemplo, con un botón "Mostrar mapa").`
+              : "No detectamos cookies de analítica ni publicidad.",
+          }),
   }));
 
   C.push(item({

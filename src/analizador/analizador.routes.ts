@@ -87,7 +87,7 @@ function resumen(r: Resultado) {
     fecha: r.fecha,
     categorias: r.categorias,
     hallazgos: prioridades(r, 3).map((c) => ({ titulo: c.titulo, estado: c.estado, detalle: c.detalle })),
-    totalHallazgos: r.controles.filter((c) => c.estado === "falla" || c.estado === "parcial").length,
+    totalHallazgos: r.controles.filter((c) => c.estado === "falla" || c.estado === "parcial" || c.estado === "revisar").length,
     navegador: r.sitio.navegador,
   };
 }

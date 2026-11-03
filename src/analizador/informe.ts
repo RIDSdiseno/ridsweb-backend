@@ -445,7 +445,7 @@ export function generarPdf(r: Resultado, contacto: ContactoInforme, cfg: ConfigI
         const sy = doc.y;
         doc.circle(X + 4, sy + 6, 2.5).fill(P.celeste);
         doc.font("S").fontSize(9.5).fill(P.blanco).text(s.nombre, X + 14, sy, { continued: true })
-          .font("N").fill(P.suave).text(` — ${s.tipo}${s.cookies ? " (instala cookies)" : ""}`);
+          .font("N").fill(P.suave).text(` — ${s.tipo}${s.cookies ? " (instala cookies)" : ""}${s.soloCodigo ? " · en el código del sitio" : ""}`);
         doc.moveDown(0.2);
       }
       doc.moveDown(0.8);
