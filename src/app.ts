@@ -11,6 +11,7 @@ import helmet from "helmet";
 
 import apiRouter from "./api.routes";
 import { cerrarNavegador } from "./analizador/navegador";
+import { iniciarReportes, enviarPendientesAlApagar } from "./analizador/reportes";
 
 const app: Application =
   express();
@@ -162,5 +163,28 @@ const server =
       console.log(
         `RIDS backend escuchando en puerto ${PORT}`
       );
+
+      iniciarReportes();
     }
   );
+
+/* =====================================================
+ APAGADO ORDENADO
+===================================================== */
+
+/**
+ * Railway envía SIGTERM en cada deploy.
+ * Antes de salir se envía el reporte pendiente
+ * y se cierra el navegador del analizador.
+ */
+for (const senal of ["SIGINT", "SIGTERM"] as const) {
+  process.on(
+    senal,
+    async () => {
+      server.close();
+      await enviarPendientesAlApagar();
+      await cerrarNavegador();
+      process.exit(0);
+    }
+  );
+}

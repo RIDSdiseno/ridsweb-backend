@@ -17,6 +17,8 @@ import { ErrorUsuario, normalizarDominio } from "./red";
 import { generarPdf, generarHtmlCorreo, textoPlano, prioridades, RUTA_LOGO, type ConfigInforme } from "./informe";
 import { enviarCorreo, correoConfigurado, correoRids } from "./correo";
 
+import { registrarAnalisis, enviarReporte, cantidadPendiente } from "./reportes";
+
 // ============================================================
 // TIPOS
 // ============================================================
@@ -194,6 +196,17 @@ async function procesar(
       console.error("[ANALIZADOR] Error enviando informe al cliente:", (e as Error).message);
     }
 
+    // Se anota para el reporte periódico
+    registrarAnalisis({
+      fecha: new Date().toISOString(),
+      dominio,
+      puntaje: r.puntaje,
+      nivel: r.nivel,
+      ...contacto,
+      novedades,
+      correo: t.correo,
+    });
+
     // 2) Aviso interno a RIDS (lead). Se envía siempre: es el registro que no se pierde con los deploys.
     enviarCorreo({
       para: process.env.ANALIZADOR_AVISO_EMAIL || correoRids(),
@@ -221,6 +234,19 @@ async function procesar(
     t.estado = "error";
     t.error = deUsuario ? err.message : "No pudimos completar el análisis de este sitio.";
     if (!deUsuario) console.error("[ANALIZADOR] Error analizando", dominio, err);
+
+    // También se anotan los análisis fallidos: el contacto igual dejó sus datos
+    registrarAnalisis({
+      fecha: new Date().toISOString(),
+      dominio,
+      puntaje: null,
+      nivel: null,
+      ...contacto,
+      novedades,
+      correo: "-",
+      error: t.error,
+    });
+    
   } finally {
     enCurso.delete(id);
   }
@@ -234,6 +260,20 @@ const router = Router();
 
 router.get("/salud", (_req, res) => {
   res.json({ ok: true, correo: correoConfigurado() });
+});
+
+router.post("/reporte/enviar", async (req, res) => {
+  const esperado = process.env.ADMIN_TOKEN || "";
+  const recibido = String(req.headers["x-admin-token"] || "");
+  const valido =
+    esperado.length >= 16 &&
+    recibido.length === esperado.length &&
+    crypto.timingSafeEqual(Buffer.from(recibido), Buffer.from(esperado));
+  if (!valido) return responderError(res, 404, "No encontrado.");
+
+  const pendientesAntes = cantidadPendiente();
+  const enviados = await enviarReporte("manual");
+  res.json({ ok: true, pendientesAntes, enviados });
 });
 
 router.post("/analisis", limitePorIp, (req, res) => {
