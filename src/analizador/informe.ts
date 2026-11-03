@@ -115,8 +115,8 @@ export function generarPdf(r: Resultado, contacto: ContactoInforme, cfg: ConfigI
     doc.fill(TINTA).font("Helvetica-Bold").fontSize(13).text(`Nivel: ${r.nivel}`, X + 130, yP + 20);
     doc.font("Helvetica").fontSize(9.5).fill(GRIS).text(
       `Preparado para ${contacto.nombre}${contacto.empresa ? `, ${contacto.empresa}` : ""}. ` +
-        `Revisión automática de lo que cualquier visitante ve del sitio ${r.sitio.url}. ` +
-        "La Ley 21.719 rige desde el 1 de diciembre de 2026.",
+      `Revisión automática de lo que cualquier visitante ve del sitio ${r.sitio.url}. ` +
+      "La Ley 21.719 rige desde el 1 de diciembre de 2026.",
       X + 130, yP + 40, { width: W - 150 }
     );
     doc.y = yP + 112;
@@ -197,8 +197,8 @@ export function generarPdf(r: Resultado, contacto: ContactoInforme, cfg: ConfigI
     titulo("Alcance de esta revisión");
     doc.fill(GRIS).font("Helvetica").fontSize(8.8).text(
       "Este informe revisa en forma automática la página de inicio, la política de privacidad enlazada y la configuración pública del dominio. " +
-        "No revisa sistemas internos, bases de datos, contratos con proveedores, registro de actividades de tratamiento, protocolos de vulneraciones " +
-        "ni otras obligaciones de la Ley 21.719 que no son visibles desde internet. No constituye asesoría legal.",
+      "No revisa sistemas internos, bases de datos, contratos con proveedores, registro de actividades de tratamiento, protocolos de vulneraciones " +
+      "ni otras obligaciones de la Ley 21.719 que no son visibles desde internet. No constituye asesoría legal.",
       X, doc.y, { width: W, align: "justify" }
     );
     doc.moveDown(1);
@@ -268,11 +268,23 @@ ${pr.length ? `<tr><td style="padding:22px 32px 4px"><div style="font-size:15px;
 <tr><td style="padding:12px 32px 30px"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${AZUL};border-radius:8px"><tr><td style="padding:20px 22px">
   <div style="color:#fff;font-size:15px;font-weight:700">¿Le ayudamos a cumplir?</div>
   <div style="color:#cfe6f3;font-size:13px;margin:6px 0 14px;line-height:1.5">Implementamos la política, el banner de cookies, los formularios y las medidas de seguridad que exige la ley.</div>
-  <a href="${esc(cfg.urlAgenda || "https://rids.cl/#contacto")}" style="display:inline-block;background:${CELESTE};color:#fff;text-decoration:none;font-size:14px;font-weight:600;padding:10px 20px;border-radius:6px">Hablar con RIDS</a>
+  <a href="${esc(urlHablar(r, cfg))}" style="display:inline-block;background:${CELESTE};color:#fff;text-decoration:none;font-size:14px;font-weight:600;padding:10px 20px;border-radius:6px">Hablar con RIDS</a>
 </td></tr></table></td></tr>
 <tr><td style="padding:0 32px 26px;font-size:11px;color:#9aa7b4;line-height:1.5">Revisión automática de la información pública del sitio; no constituye asesoría legal.
 Recibe este correo porque solicitó el informe en rids.cl. Sus datos se tratan según nuestra <a href="${esc(cfg.urlPrivacidad || "https://rids.cl/politica-privacidad")}" style="color:#9aa7b4">política de privacidad</a>.</td></tr>
 </table></td></tr></table></body></html>`;
+}
+
+/** Enlace del botón "Hablar con RIDS": WhatsApp con mensaje prellenado si hay número configurado. */
+function urlHablar(r: Resultado, cfg: ConfigInforme): string {
+  const numero = (process.env.WHATSAPP_NUMERO || "").replace(/\D/g, ""); // solo dígitos
+  if (!numero) return cfg.urlAgenda || "https://rids.cl/#contacto";
+
+  const mensaje =
+    `Hola RIDS, recibí el informe Ley 21.719 de ${r.dominio} ` +
+    `(${r.puntaje}/100) y quiero ayuda para cumplir con la ley.`;
+
+  return `https://wa.me/${numero}?text=${encodeURIComponent(mensaje)}`;
 }
 
 export function textoPlano(r: Resultado, contacto: ContactoInforme): string {
