@@ -76,7 +76,7 @@ export interface Resultado {
   dominio: string;
   fecha: string;
   avisos: string[];
-  sitio: { url: string; titulo: string; plataforma: string; navegador: boolean };
+  sitio: { url: string; titulo: string; plataforma: string; navegador: boolean; spa: boolean };
   datos: {
     cert: Certificado;
     redir: boolean | null;
@@ -286,12 +286,112 @@ const item = (o: Record<string, unknown>): Control =>
   ({ estado: "revisar", peso: 1, ...o }) as Control;
 
 // ============================================================
+// SITIOS QUE SE ARMAN CON JAVASCRIPT (React, Vue, Angular…)
+// ============================================================
+// Sin navegador, el HTML de estas páginas llega casi vacío (<div id="root">).
+// Para no dar falsos "No cumple", se descargan los archivos JavaScript del propio
+// sitio (con los mismos límites de tamaño y seguridad) y se busca en ellos lo que
+// el navegador terminaría mostrando. No ejecuta código: solo lee texto.
+
+interface InfoSpa {
+  codigo: string;                  // texto de los scripts (se descarta al terminar el análisis)
+  rutas: string[];                 // rutas internas encontradas ("/politica-privacidad", …)
+  bannerPropio: boolean;           // textos de un aviso de cookies
+  formulario: { campos: boolean; casillaPrivacidad: boolean };
+  archivos: number;
+}
+
+const MAX_SCRIPTS = 6;
+const MAX_CODIGO = 8 * 1024 * 1024; // 8 MB en total
+
+const esPaginaSpa = (html: string) =>
+  palabras(texto(html)) < 60 &&
+  /<script\b[^>]*\bsrc\s*=/i.test(html) &&
+  /id=["'](root|app|__next|__nuxt)["']|<app-root|ng-version|data-reactroot/i.test(html);
+
+function scriptsDelSitio(html: string, base: string, dominio: string): string[] {
+  const urls = new Set<string>();
+  const re = /<(?:script|link)\b[^>]*\b(?:src|href)\s*=\s*["']([^"']+\.m?js(?:\?[^"']*)?)["'][^>]*>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(html))) {
+    try {
+      const u = new URL(m[1], base);
+      const h = u.hostname.replace(/^www\./, "");
+      if (h === dominio || h.endsWith("." + dominio)) urls.add(u.toString());
+    } catch {
+      /* ruta rota */
+    }
+  }
+  return [...urls].slice(0, MAX_SCRIPTS);
+}
+
+async function revisarCodigoSpa(html: string, base: string, dominio: string): Promise<InfoSpa | null> {
+  const pendientes = scriptsDelSitio(html, base, dominio);
+  if (!pendientes.length) return null;
+
+  const vistos = new Set<string>();
+  let codigo = "";
+  let archivos = 0;
+
+  while (pendientes.length && archivos < MAX_SCRIPTS && codigo.length < MAX_CODIGO) {
+    const url = pendientes.shift() as string;
+    if (vistos.has(url)) continue;
+    vistos.add(url);
+    try {
+      const p = await obtener(url, { timeout: 10000 });
+      if (p.status >= 400) continue;
+      codigo += "\n" + p.html.slice(0, MAX_CODIGO - codigo.length);
+      archivos++;
+
+      // Páginas cargadas por separado (React.lazy): se siguen solo las que suenan a legales
+      for (const c of p.html.matchAll(/["'`]([^"'`\s]*?(?:privac|cookie|legal|aviso|termin|condicion)[^"'`\s]*?\.m?js)["'`]/gi)) {
+        try {
+          const u = new URL(c[1], url).toString();
+          if (!vistos.has(u) && new URL(u).hostname.replace(/^www\./, "").endsWith(dominio)) pendientes.push(u);
+        } catch {
+          /* ruta rota */
+        }
+      }
+    } catch {
+      /* script inaccesible: se ignora */
+    }
+  }
+  if (!codigo) return null;
+
+  // Los empaquetadores escriben los acentos como \xED o \u00ED: se decodifican para poder buscar textos
+  codigo = codigo
+    .replace(/\\x([0-9a-f]{2})/gi, (_, h: string) => String.fromCharCode(parseInt(h, 16)))
+    .replace(/\\u([0-9a-f]{4})/gi, (_, h: string) => String.fromCharCode(parseInt(h, 16)));
+
+  // Rutas internas escritas en el código: path:"/politica-privacidad", to:"/cookies", href:"/aviso-legal"…
+  const rutas = new Set<string>();
+  for (const m of codigo.matchAll(/["'`](\/[a-z0-9][a-z0-9\-_/]{2,80})["'`]/gi)) {
+    const ruta = m[1].replace(/\/+$/, "");
+    if (/^\/(assets|static|_next|node_modules|src)\//i.test(ruta)) continue;
+    if (/\.[a-z0-9]{2,4}$/i.test(ruta)) continue;
+    rutas.add(ruta);
+  }
+
+  // Textos de un aviso de cookies propio (dentro de una misma cadena de texto)
+  const bannerPropio =
+    /cookies?[^"'`]{0,240}(aceptar|acepto|rechazar|configurar|preferencias)|(aceptar|acepto|rechazar)[^"'`]{0,240}cookies?/i.test(codigo);
+
+  // Formularios armados con JavaScript (JSX compilado: type:"email")
+  const campos = /type\s*:\s*["'](email|tel)["']/i.test(codigo);
+  // Casilla cerca de un texto de privacidad (ej. "He leído la Política de Privacidad")
+  const casillaPrivacidad =
+    /type\s*:\s*["']checkbox["'][\s\S]{0,600}(privacidad|privacy)|(privacidad|privacy)[\s\S]{0,600}type\s*:\s*["']checkbox["']/i.test(codigo);
+
+  return { codigo, rutas: [...rutas], bannerPropio, formulario: { campos, casillaPrivacidad }, archivos };
+}
+
+// ============================================================
 // ANÁLISIS
 // ============================================================
 
 export async function analizarSitio(
   entrada: string,
-  { alAvanzar = (_paso: string) => {} }: { alAvanzar?: (paso: string) => void } = {}
+  { alAvanzar = (_paso: string) => { } }: { alAvanzar?: (paso: string) => void } = {}
 ): Promise<Resultado> {
   const dominio = normalizarDominio(entrada);
   await hostPublico(dominio);
@@ -341,6 +441,17 @@ export async function analizarSitio(
     r.avisos.push("El sitio arma su contenido con JavaScript y se revisó solo el HTML inicial.");
   }
 
+  // Sitio armado con JavaScript y sin navegador: se lee su código
+  let spa: InfoSpa | null = null;
+  if (!navegador && esPaginaSpa(html)) {
+    spa = await revisarCodigoSpa(html, urlFinal, dominio).catch(() => null);
+    if (spa) {
+      r.avisos.pop();
+      r.avisos.push(`El sitio arma su contenido con JavaScript: se revisaron ${spa.archivos} archivo(s) de su código.`);
+    }
+  }
+  const codigoSpa = spa?.codigo || "";
+
   const cab: Record<string, string> = {};
   pag.headers.forEach((v: string, k: string) => {
     cab[k.toLowerCase()] = v;
@@ -368,6 +479,22 @@ export async function analizarSitio(
     });
     if (l) legal[k] = l;
   }
+  // En sitios armados con JavaScript, las rutas legales se buscan en su código
+  if (spa) {
+    const prefer: Record<keyof typeof LEGALES, RegExp> = {
+      privacidad: /privacidad|privacy/i,
+      cookies: /cookie/i,
+      aviso: /aviso-legal|terminos|t%C3%A9rminos|condiciones|legal/i,
+    };
+    for (const k of Object.keys(LEGALES) as (keyof typeof LEGALES)[]) {
+      if (legal[k]) continue;
+      const ruta =
+        spa.rutas.find((x) => prefer[k].test(x)) ||
+        spa.rutas.find((x) => LEGALES[k].test(x.replace(/[-_]/g, " ")));
+      if (ruta) legal[k] = { texto: "código del sitio", url: new URL(ruta, urlFinal).toString() };
+    }
+  }
+
   if (
     legal.cookies && legal.privacidad &&
     legal.cookies.url === legal.privacidad.url &&
@@ -404,14 +531,14 @@ export async function analizarSitio(
   }
 
   const servicios: Servicio[] = SERVICIOS
-    .filter(([, re]) => re.test(html))
+    .filter(([, re]) => re.test(html) || (codigoSpa !== "" && re.test(codigoSpa)))
     .map(([nombre, , tipo, cookies]) => ({ nombre, tipo, cookies }));
   const rastreadores = servicios.filter((s) => s.cookies && !/Seguridad/.test(s.tipo));
 
   const textoInicio = texto(html);
   const banner =
-    BANNERS.find(([, re]) => re.test(html))?.[0] ||
-    (/cookie/i.test(textoInicio) && /(aceptar|acepto|rechazar|configurar|preferencias)/i.test(textoInicio)
+    BANNERS.find(([, re]) => re.test(html) || (codigoSpa !== "" && re.test(codigoSpa)))?.[0] ||
+    ((/cookie/i.test(textoInicio) && /(aceptar|acepto|rechazar|configurar|preferencias)/i.test(textoInicio)) || spa?.bannerPropio
       ? "Aviso de cookies propio"
       : null);
 
@@ -435,6 +562,7 @@ export async function analizarSitio(
     titulo: texto(html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] || "").slice(0, 120),
     plataforma: PLATAFORMAS.find(([, re]) => re.test(html))?.[0] || "No identificada",
     navegador,
+    spa: Boolean(spa),
   };
   r.datos = { cert, redir, correo, legal, politica, servicios, banner, cookiesAntes, forms, cabSeg, version, mixto };
 
@@ -452,17 +580,22 @@ export async function analizarSitio(
     titulo: "Política de privacidad publicada",
     ...(legal.privacidad && politica?.directo != null && politica.directo >= 400
       ? {
-          estado: "parcial",
-          detalle: `El enlace ${legal.privacidad.url} responde error ${politica.directo} al abrirlo directamente (solo funciona navegando desde el inicio).`,
-          recomendacion: "Configure el servidor para que la dirección de la política abra directamente; se comparte por correo y la indexan los buscadores.",
-        }
+        estado: "parcial",
+        detalle: `El enlace ${legal.privacidad.url} responde error ${politica.directo} al abrirlo directamente (solo funciona navegando desde el inicio).`,
+        recomendacion: "Configure el servidor para que la dirección de la política abra directamente; se comparte por correo y la indexan los buscadores.",
+      }
       : legal.privacidad
-        ? { estado: "ok", detalle: `Encontrada: ${legal.privacidad.url}` }
+        ? {
+          estado: "ok",
+          detalle: `Encontrada: ${legal.privacidad.url}${legal.privacidad.texto === "código del sitio" ? " (detectada en el código del sitio)" : ""}`,
+        }
         : {
-            estado: "falla",
-            detalle: "No encontramos un enlace a la política de privacidad en la página de inicio.",
-            recomendacion: "Publique una política de tratamiento de datos personales y enlácela en el pie de todas las páginas.",
-          }),
+          estado: "falla",
+          detalle: spa
+            ? "No encontramos una política de privacidad ni en la página de inicio ni en el código del sitio."
+            : "No encontramos un enlace a la política de privacidad en la página de inicio.",
+          recomendacion: "Publique una política de tratamiento de datos personales y enlácela en el pie de todas las páginas.",
+        }),
   }));
 
   if (politica?.leida && politica.contenidos && politica.derechos) {
@@ -509,8 +642,12 @@ export async function analizarSitio(
     C.push(item({
       id: "contenidos", categoria: A, peso: 4, ley: "Art. 14 ter", estado: "revisar",
       titulo: "Contenidos mínimos de la política",
-      detalle: "No pudimos leer el texto de la política (es un PDF, una imagen o se carga con JavaScript).",
-      recomendacion: "Publique la política como texto en una página del sitio.",
+      detalle: spa
+        ? "La política existe, pero el sitio la muestra con JavaScript y no pudimos leer su texto para revisar los contenidos mínimos."
+        : "No pudimos leer el texto de la política (es un PDF, una imagen o se carga con JavaScript).",
+      recomendacion: spa
+        ? "Revise que la política incluya los 14 contenidos del art. 14 ter y publíquela como HTML que se lea sin JavaScript (prerenderizada)."
+        : "Publique la política como texto en una página del sitio.",
     }));
   }
 
@@ -520,10 +657,10 @@ export async function analizarSitio(
     ...(legal.aviso
       ? { estado: "ok", detalle: `Encontrado: ${legal.aviso.url}` }
       : {
-          estado: "parcial",
-          detalle: "No encontramos términos de uso ni aviso legal.",
-          recomendacion: "Publique un aviso legal que identifique a la empresa (razón social, RUT y domicilio).",
-        }),
+        estado: "parcial",
+        detalle: "No encontramos términos de uso ni aviso legal.",
+        recomendacion: "Publique un aviso legal que identifique a la empresa (razón social, RUT y domicilio).",
+      }),
   }));
 
   // Cookies
@@ -532,16 +669,16 @@ export async function analizarSitio(
     titulo: "Aviso y consentimiento de cookies",
     ...(rastreadores.length === 0 && cookiesNoTecnicas.length === 0
       ? {
-          estado: banner ? "ok" : "na",
-          detalle: banner ? `Tiene aviso de cookies (${banner}).` : "No detectamos herramientas que requieran consentimiento.",
-        }
+        estado: banner ? "ok" : "na",
+        detalle: banner ? `Tiene aviso de cookies (${banner}).` : "No detectamos herramientas que requieran consentimiento.",
+      }
       : banner
         ? { estado: "ok", detalle: `Tiene aviso de cookies (${banner}).` }
         : {
-            estado: "falla",
-            detalle: `Usa ${rastreadores.map((s) => s.nombre).join(", ") || "cookies no técnicas"} sin un aviso de consentimiento.`,
-            recomendacion: "Instale un gestor de consentimiento que bloquee la analítica y la publicidad hasta que el visitante acepte.",
-          }),
+          estado: "falla",
+          detalle: `Usa ${rastreadores.map((s) => s.nombre).join(", ") || "cookies no técnicas"} sin un aviso de consentimiento.`,
+          recomendacion: "Instale un gestor de consentimiento que bloquee la analítica y la publicidad hasta que el visitante acepte.",
+        }),
   }));
 
   C.push(item({
@@ -549,17 +686,17 @@ export async function analizarSitio(
     titulo: "Cookies instaladas antes de aceptar",
     ...(cookiesNoTecnicas.length
       ? {
-          estado: "falla",
-          detalle: `Al entrar, sin aceptar nada, se instalan: ${[...new Set(cookiesNoTecnicas.map((c) => c.nombre))].slice(0, 8).join(", ")}.`,
-          recomendacion: "Configure el sitio para que la analítica y la publicidad se activen solo después del consentimiento.",
-        }
+        estado: "falla",
+        detalle: `Al entrar, sin aceptar nada, se instalan: ${[...new Set(cookiesNoTecnicas.map((c) => c.nombre))].slice(0, 8).join(", ")}.`,
+        recomendacion: "Configure el sitio para que la analítica y la publicidad se activen solo después del consentimiento.",
+      }
       : navegador
         ? { estado: "ok", detalle: "No se instalan cookies de analítica ni publicidad antes de aceptar." }
         : rastreadores.length
           ? {
-              estado: "revisar",
-              detalle: "El sitio carga herramientas que suelen instalar cookies; confirme en el navegador que esperan el consentimiento.",
-            }
+            estado: "revisar",
+            detalle: "El sitio carga herramientas que suelen instalar cookies; confirme en el navegador que esperan el consentimiento.",
+          }
           : { estado: "ok", detalle: "No detectamos cookies de analítica ni publicidad." }),
   }));
 
@@ -570,10 +707,10 @@ export async function analizarSitio(
       ? { estado: "ok", detalle: `Encontrada: ${legal.cookies.url}` }
       : rastreadores.length || cookiesNoTecnicas.length
         ? {
-            estado: "parcial",
-            detalle: "No encontramos una política de cookies.",
-            recomendacion: "Publique qué cookies usa el sitio, para qué y por cuánto tiempo.",
-          }
+          estado: "parcial",
+          detalle: "No encontramos una política de cookies.",
+          recomendacion: "Publique qué cookies usa el sitio, para qué y por cuánto tiempo.",
+        }
         : { estado: "na", detalle: "No se requiere si el sitio no usa cookies propias de analítica o publicidad." }),
   }));
 
@@ -612,6 +749,22 @@ export async function analizarSitio(
       detalle: inseguros.length ? "Hay formularios que envían los datos sin cifrar (http)." : "Los formularios envían los datos por HTTPS.",
       recomendacion: inseguros.length ? "Envíe todos los formularios por HTTPS." : null,
     }));
+  } else if (spa?.formulario.campos) {
+    // Formularios armados con JavaScript: se deduce del código si hay casilla de privacidad
+    C.push(item({
+      id: "form_aviso", categoria: F, peso: 3, ley: "Arts. 12 y 14 ter",
+      titulo: "Aviso de privacidad en formularios",
+      ...(spa.formulario.casillaPrivacidad
+        ? {
+          estado: "ok",
+          detalle: "El sitio arma sus formularios con JavaScript; en su código hay campos de correo o teléfono junto a una casilla que menciona la política de privacidad.",
+        }
+        : {
+          estado: "revisar",
+          detalle: "El sitio arma sus formularios con JavaScript y pide correo o teléfono; no encontramos en su código una casilla o aviso de privacidad.",
+          recomendacion: "Agregue junto al botón de envío un texto breve con la finalidad y un enlace a la política (y una casilla si los datos se usarán para marketing).",
+        }),
+    }));
   } else {
     C.push(item({
       id: "form_aviso", categoria: F, peso: 0, ley: "Arts. 12 y 14 ter",
@@ -630,15 +783,15 @@ export async function analizarSitio(
     titulo: "Conexión cifrada (HTTPS)",
     ...(https && cert.valido
       ? {
-          estado: dias < 15 ? "parcial" : "ok",
-          detalle: `Certificado válido emitido por ${cert.emisor || "—"}, vence el ${cert.vence} (${dias} días).`,
-          recomendacion: dias < 15 ? "Renueve el certificado SSL o active la renovación automática." : null,
-        }
+        estado: dias < 15 ? "parcial" : "ok",
+        detalle: `Certificado válido emitido por ${cert.emisor || "—"}, vence el ${cert.vence} (${dias} días).`,
+        recomendacion: dias < 15 ? "Renueve el certificado SSL o active la renovación automática." : null,
+      }
       : {
-          estado: "falla",
-          detalle: https ? cert.error : "El sitio no usa HTTPS.",
-          recomendacion: "Instale un certificado SSL válido y sirva todo el sitio por HTTPS.",
-        }),
+        estado: "falla",
+        detalle: https ? cert.error : "El sitio no usa HTTPS.",
+        recomendacion: "Instale un certificado SSL válido y sirva todo el sitio por HTTPS.",
+      }),
   }));
 
   const hsts = "strict-transport-security" in cab;
